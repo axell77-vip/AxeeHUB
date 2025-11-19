@@ -28,6 +28,8 @@ RemoteReferences.UpdateAutoFishing = RemoteReferences.Net:WaitForChild("RF/Updat
 RemoteReferences.SellRemote = RemoteReferences.Net:WaitForChild("RF/SellAllItems")
 RemoteReferences.RodPurchase = RemoteReferences.Net:WaitForChild("RF/PurchaseFishingRod")
 RemoteReferences.StartMini = RemoteReferences.Net:WaitForChild("RF/RequestFishingMinigameStarted")
+RemoteReferences.ChargeRod = RemoteReferences.Net:WaitForChild("RF/ChargeFishingRod")
+RemoteReferences.FishingCompleted = RemoteReferences.Net:WaitForChild("RE/FishingCompleted")
 
 -- LOCATIONS
 local Locations = {
@@ -40,7 +42,6 @@ local Locations = {
 local Config = {
     AutoFishing = false,
     AutoSell = false,
-    AutoSellLoop = false,
     PerfectCatch = true,
 }
 local FishingActive = false
@@ -57,12 +58,17 @@ local function StartFishing()
     end)
     task.wait(0.5)
 
-    -- Enable auto fishing
+    -- Enable auto fishing once
     pcall(function()
         RemoteReferences.UpdateAutoFishing:InvokeServer(true)
     end)
 
-    -- Perfect catch hook
+    -- Charge rod
+    pcall(function()
+        RemoteReferences.ChargeRod:InvokeServer()
+    end)
+
+    -- Start minigame (perfect catch)
     if Config.PerfectCatch then
         local mt = getrawmetatable(game)
         if mt then
@@ -71,50 +77,25 @@ local function StartFishing()
             mt.__namecall = newcclosure(function(self, ...)
                 local method = getnamecallmethod()
                 if method == "InvokeServer" and self == RemoteReferences.StartMini and Config.AutoFishing then
-                    return oldNamecall(self, -1.233184814453125, 0.9945034885633273)
+                    return oldNamecall(self, -0.5718746185302734, 0.5, 1763575694.689195)
                 end
                 return oldNamecall(self, ...)
             end)
             setreadonly(mt, true)
         end
     end
-
-    -- Auto fishing loop
-    task.spawn(function()
-        while Config.AutoFishing do
-            task.wait(1)
-        end
-
-        -- Stop auto fishing + unequip rod
-        pcall(function()
-            RemoteReferences.UpdateAutoFishing:InvokeServer(false)
-            RemoteReferences.UnequipRemote:FireServer()
-        end)
-        FishingActive = false
-    end)
 end
 
 local function StopFishing()
+    if not FishingActive then return end
     Config.AutoFishing = false
-end
+    FishingActive = false
 
---== AUTO SELL FUNCTIONS ==--
-local function StartAutoSell()
-    if Config.AutoSellLoop then return end
-    Config.AutoSellLoop = true
-
-    task.spawn(function()
-        while Config.AutoSellLoop do
-            task.wait(3)
-            pcall(function()
-                RemoteReferences.SellRemote:InvokeServer()
-            end)
-        end
+    -- Disable auto fishing once and unequip rod
+    pcall(function()
+        RemoteReferences.UpdateAutoFishing:InvokeServer(false)
+        RemoteReferences.UnequipRemote:FireServer()
     end)
-end
-
-local function StopAutoSell()
-    Config.AutoSellLoop = false
 end
 
 --== TAB: FISHING FEATURE ==--
@@ -133,17 +114,23 @@ TabFishing:CreateToggle({
     end
 })
 
-TabFishing:CreateToggle({
+-- Auto Sell in a separate tab to prevent blocking fishing
+local TabSell = Window:CreateTab("Auto Sell", "bag")
+
+TabSell:CreateToggle({
     Name = "Auto Sell",
     CurrentValue = false,
     Flag = "AutoSell",
     Callback = function(Value)
         Config.AutoSell = Value
-        if Value then
-            StartAutoSell()
-        else
-            StopAutoSell()
-        end
+        task.spawn(function()
+            while Config.AutoSell do
+                task.wait(3)
+                pcall(function()
+                    RemoteReferences.SellRemote:InvokeServer()
+                end)
+            end
+        end)
     end
 })
 
@@ -177,14 +164,14 @@ TabFishing:CreateButton({
 --== TAB: TELEPORT ==--
 local TabTeleport = Window:CreateTab("Teleport", "map")
 
-TabTeleport:CreateButton({ Name = "Volcano", Callback = function() hrp.CFrame = Locations.Volcano end })
-TabTeleport:CreateButton({ Name = "Treasure Room", Callback = function() hrp.CFrame = Locations.Treasure end })
-TabTeleport:CreateButton({ Name = "Sisyphus Statue", Callback = function() hrp.CFrame = Locations.Sisyphus end })
+TabTeleport:CreateButton({Name = "Volcano", Callback = function() hrp.CFrame = Locations.Volcano end})
+TabTeleport:CreateButton({Name = "Treasure Room", Callback = function() hrp.CFrame = Locations.Treasure end})
+TabTeleport:CreateButton({Name = "Sisyphus Statue", Callback = function() hrp.CFrame = Locations.Sisyphus end})
 
 --== TAB: GHOSTFINN QUEST ==--
 local TabGhostfinnQuest = Window:CreateTab("Ghostfinn Quest", "fish")
 
--- TREASURE QUEST
+-- Treasure Quest
 local TreasureQuestParagraph = TabGhostfinnQuest:CreateParagraph({
     Title = "Treasure Quest",
     Content = "Waiting to track Treasure quest..."
@@ -211,6 +198,7 @@ TabGhostfinnQuest:CreateToggle({
                 StartFishing()
                 while TreasureQuestConfig.Active do
                     task.wait(5)
+                    -- get quest progress
                     local tracker = WorkspaceService:FindFirstChild("!!! MENU RINGS")
                     local progress = 0
                     if tracker then
@@ -244,15 +232,15 @@ TabGhostfinnQuest:CreateToggle({
     end
 })
 
--- SISYPHUS QUEST
+-- Sisyphus Quest
 local SisyphusQuestParagraph = TabGhostfinnQuest:CreateParagraph({
     Title = "Sisyphus Quests",
     Content = "Waiting to track Sisyphus quests..."
 })
 
 local SisyphusQuestList = {
-    { Name = "Catch 3 Mythic fish", Key = "CatchFish", Value = 3, Tier = 6, Location = Locations.Sisyphus, LocationName = "Sisyphus Statue" },
-    { Name = "Catch 1 SECRET fish", Key = "CatchFish", Value = 1, Tier = 7, Location = Locations.Sisyphus, LocationName = "Sisyphus Statue" }
+    {Name = "Catch 3 Mythic fish", Key = "CatchFish", Value = 3, Tier = 6, Location = Locations.Sisyphus, LocationName = "Sisyphus Statue"},
+    {Name = "Catch 1 SECRET fish", Key = "CatchFish", Value = 1, Tier = 7, Location = Locations.Sisyphus, LocationName = "Sisyphus Statue"}
 }
 
 TabGhostfinnQuest:CreateToggle({
