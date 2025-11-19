@@ -41,7 +41,6 @@ local Locations = {
 -- CONFIG
 local Config = {
     AutoFishing = false,
-    AutoSell = false,
     PerfectCatch = true,
 }
 local FishingActive = false
@@ -52,23 +51,18 @@ local function StartFishing()
     FishingActive = true
     Config.AutoFishing = true
 
-    -- Equip rod
+    -- AUTO EQUIP ROD
     pcall(function()
         RemoteReferences.EquipRemote:FireServer()
     end)
     task.wait(0.5)
 
-    -- Enable auto fishing once
+    -- ENABLE AUTO FISHING
     pcall(function()
         RemoteReferences.UpdateAutoFishing:InvokeServer(true)
     end)
 
-    -- Charge rod
-    pcall(function()
-        RemoteReferences.ChargeRod:InvokeServer()
-    end)
-
-    -- Start minigame (perfect catch)
+    -- PERFECT CATCH HOOK
     if Config.PerfectCatch then
         local mt = getrawmetatable(game)
         if mt then
@@ -77,25 +71,62 @@ local function StartFishing()
             mt.__namecall = newcclosure(function(self, ...)
                 local method = getnamecallmethod()
                 if method == "InvokeServer" and self == RemoteReferences.StartMini and Config.AutoFishing then
-                    return oldNamecall(self, -0.5718746185302734, 0.5, 1763575694.689195)
+                    return oldNamecall(self, -1.233184814453125, 0.9945034885633273)
                 end
                 return oldNamecall(self, ...)
             end)
             setreadonly(mt, true)
         end
     end
+
+    -- LOOP UNTUK AUTO FISHING
+    task.spawn(function()
+        while Config.AutoFishing do
+            task.wait(1)
+        end
+
+        -- STOP AUTO FISHING + UNEQUIP ROD
+        pcall(function()
+            RemoteReferences.UpdateAutoFishing:InvokeServer(false)
+            RemoteReferences.UnequipRemote:FireServer()
+        end)
+        FishingActive = false
+    end)
 end
 
 local function StopFishing()
-    if not FishingActive then return end
     Config.AutoFishing = false
-    FishingActive = false
+end
 
-    -- Disable auto fishing once and unequip rod
-    pcall(function()
-        RemoteReferences.UpdateAutoFishing:InvokeServer(false)
-        RemoteReferences.UnequipRemote:FireServer()
-    end)
+--== QUEST TRACKING FUNCTION ==--
+local function GetQuestProgress(questKey)
+    local trackerRoot = WorkspaceService:FindFirstChild("!!! MENU RINGS")
+    if not trackerRoot then return 0 end
+
+    local totalProgress = 0
+    for _, tracker in ipairs(trackerRoot:GetChildren()) do
+        if tracker.Name:find("Tracker") and tracker.Name:lower():find(questKey:lower()) then
+            local board = tracker:FindFirstChild("Board")
+            if board then
+                local gui = board:FindFirstChild("Gui")
+                if gui and gui:FindFirstChild("Content") and gui.Content:FindFirstChild("Progress") then
+                    local label = gui.Content.Progress:FindFirstChild("ProgressLabel")
+                    if label and label:IsA("TextLabel") then
+                        local percent = string.match(label.Text, "([%d%.]+)%%")
+                        if percent then
+                            totalProgress = tonumber(percent) or totalProgress
+                        else
+                            local current, goal = string.match(label.Text, "(%d+)%s*/%s*(%d+)")
+                            if current and goal then
+                                totalProgress = math.floor((tonumber(current)/tonumber(goal))*100)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return totalProgress
 end
 
 --== TAB: FISHING FEATURE ==--
@@ -114,24 +145,14 @@ TabFishing:CreateToggle({
     end
 })
 
--- Auto Sell in a separate tab to prevent blocking fishing
-local TabSell = Window:CreateTab("Auto Sell", "bag")
-
-TabSell:CreateToggle({
-    Name = "Auto Sell",
-    CurrentValue = false,
-    Flag = "AutoSell",
-    Callback = function(Value)
-        Config.AutoSell = Value
-        task.spawn(function()
-            while Config.AutoSell do
-                task.wait(3)
-                pcall(function()
-                    RemoteReferences.SellRemote:InvokeServer()
-                end)
-            end
+-- Auto Sell changed to button
+TabFishing:CreateButton({
+    Name = "Sell Items",
+    Callback = function()
+        pcall(function()
+            RemoteReferences.SellRemote:InvokeServer()
         end)
-    end
+    end,
 })
 
 TabFishing:CreateButton({
@@ -164,14 +185,31 @@ TabFishing:CreateButton({
 --== TAB: TELEPORT ==--
 local TabTeleport = Window:CreateTab("Teleport", "map")
 
-TabTeleport:CreateButton({Name = "Volcano", Callback = function() hrp.CFrame = Locations.Volcano end})
-TabTeleport:CreateButton({Name = "Treasure Room", Callback = function() hrp.CFrame = Locations.Treasure end})
-TabTeleport:CreateButton({Name = "Sisyphus Statue", Callback = function() hrp.CFrame = Locations.Sisyphus end})
+TabTeleport:CreateButton({
+    Name = "Volcano",
+    Callback = function()
+        hrp.CFrame = Locations.Volcano
+    end
+})
+
+TabTeleport:CreateButton({
+    Name = "Treasure Room",
+    Callback = function()
+        hrp.CFrame = Locations.Treasure
+    end
+})
+
+TabTeleport:CreateButton({
+    Name = "Sisyphus Statue",
+    Callback = function()
+        hrp.CFrame = Locations.Sisyphus
+    end
+})
 
 --== TAB: GHOSTFINN QUEST ==--
 local TabGhostfinnQuest = Window:CreateTab("Ghostfinn Quest", "fish")
 
--- Treasure Quest
+-- TREASURE QUEST
 local TreasureQuestParagraph = TabGhostfinnQuest:CreateParagraph({
     Title = "Treasure Quest",
     Content = "Waiting to track Treasure quest..."
@@ -198,23 +236,7 @@ TabGhostfinnQuest:CreateToggle({
                 StartFishing()
                 while TreasureQuestConfig.Active do
                     task.wait(5)
-                    -- get quest progress
-                    local tracker = WorkspaceService:FindFirstChild("!!! MENU RINGS")
-                    local progress = 0
-                    if tracker then
-                        for _, t in ipairs(tracker:GetChildren()) do
-                            if t.Name:find("Tracker") and t.Name:lower():find(TreasureQuestConfig.Key:lower()) then
-                                local label = t:FindFirstChild("Board") and t.Board:FindFirstChild("Gui")
-                                    and t.Board.Gui:FindFirstChild("Content")
-                                    and t.Board.Gui.Content:FindFirstChild("Progress")
-                                    and t.Board.Gui.Content.Progress:FindFirstChild("ProgressLabel")
-                                if label and label:IsA("TextLabel") then
-                                    local percent = string.match(label.Text, "([%d%.]+)%%")
-                                    progress = tonumber(percent) or 0
-                                end
-                            end
-                        end
-                    end
+                    local progress = GetQuestProgress(TreasureQuestConfig.Key)
                     TreasureQuestParagraph:Set({
                         Title = "Treasure Quest",
                         Content = TreasureQuestConfig.Name.." at "..TreasureQuestConfig.LocationName.." - "..progress.."% complete"
@@ -232,15 +254,29 @@ TabGhostfinnQuest:CreateToggle({
     end
 })
 
--- Sisyphus Quest
+-- SISYPHUS QUEST
 local SisyphusQuestParagraph = TabGhostfinnQuest:CreateParagraph({
     Title = "Sisyphus Quests",
     Content = "Waiting to track Sisyphus quests..."
 })
 
 local SisyphusQuestList = {
-    {Name = "Catch 3 Mythic fish", Key = "CatchFish", Value = 3, Tier = 6, Location = Locations.Sisyphus, LocationName = "Sisyphus Statue"},
-    {Name = "Catch 1 SECRET fish", Key = "CatchFish", Value = 1, Tier = 7, Location = Locations.Sisyphus, LocationName = "Sisyphus Statue"}
+    {
+        Name = "Catch 3 Mythic fish",
+        Key = "CatchFish",
+        Value = 3,
+        Tier = 6,
+        Location = Locations.Sisyphus,
+        LocationName = "Sisyphus Statue"
+    },
+    {
+        Name = "Catch 1 SECRET fish",
+        Key = "CatchFish",
+        Value = 1,
+        Tier = 7,
+        Location = Locations.Sisyphus,
+        LocationName = "Sisyphus Statue"
+    }
 }
 
 TabGhostfinnQuest:CreateToggle({
@@ -259,22 +295,7 @@ TabGhostfinnQuest:CreateToggle({
                     StartFishing()
                     while Active do
                         task.wait(5)
-                        local tracker = WorkspaceService:FindFirstChild("!!! MENU RINGS")
-                        local progress = 0
-                        if tracker then
-                            for _, t in ipairs(tracker:GetChildren()) do
-                                if t.Name:find("Tracker") and t.Name:lower():find(quest.Key:lower()) then
-                                    local label = t:FindFirstChild("Board") and t.Board:FindFirstChild("Gui")
-                                        and t.Board.Gui:FindFirstChild("Content")
-                                        and t.Board.Gui.Content:FindFirstChild("Progress")
-                                        and t.Board.Gui.Content.Progress:FindFirstChild("ProgressLabel")
-                                    if label and label:IsA("TextLabel") then
-                                        local percent = string.match(label.Text, "([%d%.]+)%%")
-                                        progress = tonumber(percent) or 0
-                                    end
-                                end
-                            end
-                        end
+                        local progress = GetQuestProgress(quest.Key)
                         SisyphusQuestParagraph:Set({
                             Title = "Sisyphus Quests",
                             Content = quest.Name.." at "..quest.LocationName.." - "..progress.."% complete"
