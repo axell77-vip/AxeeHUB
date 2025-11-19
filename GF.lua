@@ -41,9 +41,12 @@ local Locations = {
 -- CONFIG
 local Config = {
     AutoFishing = false,
+    AutoSell = false,
     PerfectCatch = true,
+    VirtualClick = true,
 }
 local FishingActive = false
+local ClickSpeed = 0.08 -- default 80ms
 
 --== FISHING FUNCTIONS ==--
 local function StartFishing()
@@ -56,18 +59,6 @@ local function StartFishing()
         RemoteReferences.EquipRemote:FireServer()
     end)
     task.wait(0.5)
-
-    -- OVERRIDE STEAMPUNK ROD STATS
-    local backpack = player:FindFirstChild("Backpack")
-    local rodTool = char:FindFirstChildWhichIsA("Tool") or (backpack and backpack:FindFirstChildWhichIsA("Tool"))
-    if rodTool and rodTool:FindFirstChild("RodStats") then
-        local statsModule = require(rodTool.RodStats)
-        if statsModule and statsModule.Data.Name == "Steampunk Rod" then
-            statsModule.ClickPower = 0.38             -- Boost ClickPower
-            statsModule.Windup = NumberRange.new(2.6, 2.9)  -- Shorter windup like OP rod
-            statsModule.Resilience = 5.4              -- Optional resilience tweak
-        end
-    end
 
     -- ENABLE AUTO FISHING
     pcall(function()
@@ -83,37 +74,37 @@ local function StartFishing()
             mt.__namecall = newcclosure(function(self, ...)
                 local method = getnamecallmethod()
                 if method == "InvokeServer" and self == RemoteReferences.StartMini and Config.AutoFishing then
-                    return oldNamecall(self, -1.233184814453125, 0.9945034885633273)
+                    return oldNamecall(self, -1.233, 0.994)
                 end
                 return oldNamecall(self, ...)
             end)
             setreadonly(mt, true)
         end
     end
-
-    -- KEEP FISHING UNTIL TOGGLE OFF
-    task.spawn(function()
-        while Config.AutoFishing do
-            task.wait(1)
-        end
-
-        -- STOP AUTO FISHING + UNEQUIP ROD
-        pcall(function()
-            RemoteReferences.UpdateAutoFishing:InvokeServer(false)
-            RemoteReferences.UnequipRemote:FireServer()
-        end)
-        FishingActive = false
-    end)
 end
 
 local function StopFishing()
     Config.AutoFishing = false
 end
 
---== FUNCTION: QUEST TRACKING ==--
+--== VIRTUAL AUTO CLICK LOOP ==--
+task.spawn(function()
+    while true do
+        task.wait()
+        if Config.AutoFishing and Config.VirtualClick then
+            pcall(function()
+                RemoteReferences.StartMini:InvokeServer(-1.233, 0.994)
+            end)
+            task.wait(ClickSpeed)
+        end
+    end
+end)
+
+--== QUEST TRACKING FUNCTION ==--
 local function GetQuestProgress(questKey)
     local trackerRoot = WorkspaceService:FindFirstChild("!!! MENU RINGS")
     if not trackerRoot then return 0 end
+
     local totalProgress = 0
     for _, tracker in ipairs(trackerRoot:GetChildren()) do
         if tracker.Name:find("Tracker") and tracker.Name:lower():find(questKey:lower()) then
@@ -156,13 +147,27 @@ TabFishing:CreateToggle({
     end
 })
 
+-- AUTO SELL BUTTON
 TabFishing:CreateButton({
-    Name = "Sell All Items",
+    Name = "Sell Items",
     Callback = function()
         pcall(function()
             RemoteReferences.SellRemote:InvokeServer()
         end)
     end
+})
+
+-- VIRTUAL CLICK SPEED SLIDER
+TabFishing:CreateSlider({
+    Name = "Virtual Click Speed (ms)",
+    Range = {50, 500},
+    Increment = 10,
+    Suffix = "ms",
+    CurrentValue = 80,
+    Flag = "ClickSpeed",
+    Callback = function(Value)
+        ClickSpeed = Value / 1000
+    end,
 })
 
 TabFishing:CreateButton({
@@ -174,43 +179,33 @@ TabFishing:CreateButton({
                 return RemoteReferences.RodPurchase:InvokeServer(RodId)
             end)
             if success then
-                Rayfield:Notify({
-                    Title = "✅ Rod Purchase",
-                    Content = "Steampunk Rod purchase sent!",
-                    Duration = 5,
-                    Image = 4483362458
-                })
+                Rayfield:Notify({Title="✅ Rod Purchase", Content="Steampunk Rod purchase sent!", Duration=5})
             else
-                Rayfield:Notify({
-                    Title = "❌ Rod Purchase Failed",
-                    Content = tostring(response),
-                    Duration = 5,
-                    Image = 4483362458
-                })
+                Rayfield:Notify({Title="❌ Rod Purchase Failed", Content=tostring(response), Duration=5})
             end
         end)
     end
 })
 
---== TAB: TELEPORT ==
+--== TAB: TELEPORT ==--
 local TabTeleport = Window:CreateTab("Teleport", "map")
-TabTeleport:CreateButton({ Name = "Volcano", Callback = function() hrp.CFrame = Locations.Volcano end })
-TabTeleport:CreateButton({ Name = "Treasure Room", Callback = function() hrp.CFrame = Locations.Treasure end })
-TabTeleport:CreateButton({ Name = "Sisyphus Statue", Callback = function() hrp.CFrame = Locations.Sisyphus end })
+TabTeleport:CreateButton({Name="Volcano", Callback=function() hrp.CFrame = Locations.Volcano end})
+TabTeleport:CreateButton({Name="Treasure Room", Callback=function() hrp.CFrame = Locations.Treasure end})
+TabTeleport:CreateButton({Name="Sisyphus Statue", Callback=function() hrp.CFrame = Locations.Sisyphus end})
 
 --== TAB: GHOSTFINN QUEST ==--
 local TabGhostfinnQuest = Window:CreateTab("Ghostfinn Quest", "fish")
 
 -- TREASURE QUEST
-local TreasureQuestParagraph = TabGhostfinnQuest:CreateParagraph({ Title = "Treasure Quest", Content = "Waiting to track Treasure quest..." })
-local TreasureQuestConfig = { Active=false, Name="Catch 300 Rare/Epic fish", Key="CatchRareTreasureRoom", Value=300, Location=Locations.Treasure, LocationName="Treasure Room" }
+local TreasureQuestParagraph = TabGhostfinnQuest:CreateParagraph({Title="Treasure Quest", Content="Waiting to track Treasure quest..."})
+local TreasureQuestConfig = {Active=false, Name="Catch 300 Rare/Epic fish", Key="CatchRareTreasureRoom", Value=300, Location=Locations.Treasure, LocationName="Treasure Room"}
 
 TabGhostfinnQuest:CreateToggle({
     Name="Start Treasure Mission",
     CurrentValue=false,
     Flag="StartTreasureMission",
     Callback=function(Value)
-        TreasureQuestConfig.Active = Value
+        TreasureQuestConfig.Active=Value
         if Value then
             task.spawn(function()
                 hrp.CFrame = TreasureQuestConfig.Location
@@ -218,8 +213,8 @@ TabGhostfinnQuest:CreateToggle({
                 while TreasureQuestConfig.Active do
                     task.wait(5)
                     local progress = GetQuestProgress(TreasureQuestConfig.Key)
-                    TreasureQuestParagraph:Set({ Title="Treasure Quest", Content=TreasureQuestConfig.Name.." at "..TreasureQuestConfig.LocationName.." - "..progress.."% complete" })
-                    if progress >= 100 then
+                    TreasureQuestParagraph:Set({Title="Treasure Quest", Content=TreasureQuestConfig.Name.." at "..TreasureQuestConfig.LocationName.." - "..progress.."% complete"})
+                    if progress>=100 then
                         StopFishing()
                         TreasureQuestConfig.Active=false
                         break
@@ -233,10 +228,10 @@ TabGhostfinnQuest:CreateToggle({
 })
 
 -- SISYPHUS QUEST
-local SisyphusQuestParagraph = TabGhostfinnQuest:CreateParagraph({ Title = "Sisyphus Quests", Content = "Waiting to track Sisyphus quests..." })
+local SisyphusQuestParagraph = TabGhostfinnQuest:CreateParagraph({Title="Sisyphus Quests", Content="Waiting to track Sisyphus quests..."})
 local SisyphusQuestList = {
-    { Name="Catch 3 Mythic fish", Key="CatchFish", Value=3, Tier=6, Location=Locations.Sisyphus, LocationName="Sisyphus Statue" },
-    { Name="Catch 1 SECRET fish", Key="CatchFish", Value=1, Tier=7, Location=Locations.Sisyphus, LocationName="Sisyphus Statue" }
+    {Name="Catch 3 Mythic fish", Key="CatchFish", Value=3, Tier=6, Location=Locations.Sisyphus, LocationName="Sisyphus Statue"},
+    {Name="Catch 1 SECRET fish", Key="CatchFish", Value=1, Tier=7, Location=Locations.Sisyphus, LocationName="Sisyphus Statue"}
 }
 
 TabGhostfinnQuest:CreateToggle({
@@ -244,24 +239,23 @@ TabGhostfinnQuest:CreateToggle({
     CurrentValue=false,
     Flag="StartSisyphusMission",
     Callback=function(Value)
-        local CurrentIndex = 1
-        local Active = Value
+        local CurrentIndex=1
+        local Active=Value
         if Value then
             task.spawn(function()
                 while Active do
-                    local quest = SisyphusQuestList[CurrentIndex]
+                    local quest=SisyphusQuestList[CurrentIndex]
                     if not quest then break end
-                    hrp.CFrame = quest.Location
+                    hrp.CFrame=quest.Location
                     StartFishing()
                     while Active do
                         task.wait(5)
-                        local progress = GetQuestProgress(quest.Key)
-                        SisyphusQuestParagraph:Set({ Title="Sisyphus Quests", Content=quest.Name.." at "..quest.LocationName.." - "..progress.."% complete" })
-                        if progress >= 100 then
+                        local progress=GetQuestProgress(quest.Key)
+                        SisyphusQuestParagraph:Set({Title="Sisyphus Quests", Content=quest.Name.." at "..quest.LocationName.." - "..progress.."% complete"})
+                        if progress>=100 then
                             StopFishing()
-                            CurrentIndex += 1
-                            if CurrentIndex > #SisyphusQuestList then Active=false break end
-                            break
+                            CurrentIndex+=1
+                            if CurrentIndex>#SisyphusQuestList then Active=false break else break end
                         end
                     end
                 end
