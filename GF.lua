@@ -51,47 +51,45 @@ local function StartFishing()
     FishingActive = true
     Config.AutoFishing = true
 
+    -- Equip rod
+    pcall(function()
+        RemoteReferences.EquipRemote:FireServer()
+    end)
+    task.wait(0.5)
+
+    -- Enable auto fishing
+    pcall(function()
+        RemoteReferences.UpdateAutoFishing:InvokeServer(true)
+    end)
+
+    -- Perfect catch hook
+    if Config.PerfectCatch then
+        local mt = getrawmetatable(game)
+        if mt then
+            setreadonly(mt, false)
+            local oldNamecall = mt.__namecall
+            mt.__namecall = newcclosure(function(self, ...)
+                local method = getnamecallmethod()
+                if method == "InvokeServer" and self == RemoteReferences.StartMini and Config.AutoFishing then
+                    return oldNamecall(self, -1.233184814453125, 0.9945034885633273)
+                end
+                return oldNamecall(self, ...)
+            end)
+            setreadonly(mt, true)
+        end
+    end
+
+    -- Auto fishing loop
     task.spawn(function()
         while Config.AutoFishing do
-            -- Equip rod
-            pcall(function()
-                RemoteReferences.EquipRemote:FireServer()
-            end)
-            task.wait(0.5)
-
-            -- Perfect catch hook
-            if Config.PerfectCatch then
-                local mt = getrawmetatable(game)
-                if mt then
-                    setreadonly(mt, false)
-                    local oldNamecall = mt.__namecall
-                    mt.__namecall = newcclosure(function(self, ...)
-                        local method = getnamecallmethod()
-                        if method == "InvokeServer" and self == RemoteReferences.StartMini and Config.AutoFishing then
-                            return oldNamecall(self, -1.233184814453125, 0.9945034885633273)
-                        end
-                        return oldNamecall(self, ...)
-                    end)
-                    setreadonly(mt, true)
-                end
-            end
-
-            -- Fire the proper fishing sequence
-            pcall(function()
-                RemoteReferences.UpdateAutoFishing:InvokeServer(true)
-                RemoteReferences.Net:WaitForChild("RF/ChargeFishingRod"):InvokeServer()
-                RemoteReferences.StartMini:InvokeServer(-0.5718746185302734, 0.5, 1763575694.689195)
-                RemoteReferences.Net:WaitForChild("RE/FishingCompleted"):FireServer()
-            end)
-
-            -- Stop auto fishing for this cycle
-            pcall(function()
-                RemoteReferences.UpdateAutoFishing:InvokeServer(false)
-                RemoteReferences.UnequipRemote:FireServer()
-            end)
-
-            task.wait(0.5)
+            task.wait(1)
         end
+
+        -- Stop auto fishing + unequip rod
+        pcall(function()
+            RemoteReferences.UpdateAutoFishing:InvokeServer(false)
+            RemoteReferences.UnequipRemote:FireServer()
+        end)
         FishingActive = false
     end)
 end
@@ -100,7 +98,7 @@ local function StopFishing()
     Config.AutoFishing = false
 end
 
---== AUTO SELL ==--
+--== AUTO SELL FUNCTIONS ==--
 local function StartAutoSell()
     if Config.AutoSellLoop then return end
     Config.AutoSellLoop = true
@@ -117,42 +115,6 @@ end
 
 local function StopAutoSell()
     Config.AutoSellLoop = false
-end
-
---== QUEST TRACKING FUNCTION ==--
-local function TrackQuest(QuestParagraph, QuestConfig)
-    task.spawn(function()
-        while QuestConfig.Active do
-            task.wait(3) -- update interval
-            local tracker = WorkspaceService:FindFirstChild("!!! MENU RINGS")
-            local progress = 0
-            if tracker then
-                for _, t in ipairs(tracker:GetChildren()) do
-                    if t.Name:find("Tracker") and t.Name:lower():find(QuestConfig.Key:lower()) then
-                        local label = t:FindFirstChild("Board") and t.Board:FindFirstChild("Gui")
-                            and t.Board.Gui:FindFirstChild("Content")
-                            and t.Board.Gui.Content:FindFirstChild("Progress")
-                            and t.Board.Gui.Content.Progress:FindFirstChild("ProgressLabel")
-                        if label and label:IsA("TextLabel") then
-                            local percent = string.match(label.Text, "([%d%.]+)%%")
-                            progress = tonumber(percent) or 0
-                        end
-                    end
-                end
-            end
-
-            QuestParagraph:Set({
-                Title = QuestParagraph.Title,
-                Content = QuestConfig.Name.." at "..QuestConfig.LocationName.." - "..progress.."% complete"
-            })
-
-            if progress >= 100 then
-                QuestConfig.Active = false
-                StopFishing()
-                break
-            end
-        end
-    end)
 end
 
 --== TAB: FISHING FEATURE ==--
@@ -215,26 +177,9 @@ TabFishing:CreateButton({
 --== TAB: TELEPORT ==--
 local TabTeleport = Window:CreateTab("Teleport", "map")
 
-TabTeleport:CreateButton({
-    Name = "Volcano",
-    Callback = function()
-        hrp.CFrame = Locations.Volcano
-    end
-})
-
-TabTeleport:CreateButton({
-    Name = "Treasure Room",
-    Callback = function()
-        hrp.CFrame = Locations.Treasure
-    end
-})
-
-TabTeleport:CreateButton({
-    Name = "Sisyphus Statue",
-    Callback = function()
-        hrp.CFrame = Locations.Sisyphus
-    end
-})
+TabTeleport:CreateButton({ Name = "Volcano", Callback = function() hrp.CFrame = Locations.Volcano end })
+TabTeleport:CreateButton({ Name = "Treasure Room", Callback = function() hrp.CFrame = Locations.Treasure end })
+TabTeleport:CreateButton({ Name = "Sisyphus Statue", Callback = function() hrp.CFrame = Locations.Sisyphus end })
 
 --== TAB: GHOSTFINN QUEST ==--
 local TabGhostfinnQuest = Window:CreateTab("Ghostfinn Quest", "fish")
@@ -261,11 +206,39 @@ TabGhostfinnQuest:CreateToggle({
     Callback = function(Value)
         TreasureQuestConfig.Active = Value
         if Value then
-            hrp.CFrame = TreasureQuestConfig.Location
-            StartFishing()
-            TrackQuest(TreasureQuestParagraph, TreasureQuestConfig)
+            task.spawn(function()
+                hrp.CFrame = TreasureQuestConfig.Location
+                StartFishing()
+                while TreasureQuestConfig.Active do
+                    task.wait(5)
+                    local tracker = WorkspaceService:FindFirstChild("!!! MENU RINGS")
+                    local progress = 0
+                    if tracker then
+                        for _, t in ipairs(tracker:GetChildren()) do
+                            if t.Name:find("Tracker") and t.Name:lower():find(TreasureQuestConfig.Key:lower()) then
+                                local label = t:FindFirstChild("Board") and t.Board:FindFirstChild("Gui")
+                                    and t.Board.Gui:FindFirstChild("Content")
+                                    and t.Board.Gui.Content:FindFirstChild("Progress")
+                                    and t.Board.Gui.Content.Progress:FindFirstChild("ProgressLabel")
+                                if label and label:IsA("TextLabel") then
+                                    local percent = string.match(label.Text, "([%d%.]+)%%")
+                                    progress = tonumber(percent) or 0
+                                end
+                            end
+                        end
+                    end
+                    TreasureQuestParagraph:Set({
+                        Title = "Treasure Quest",
+                        Content = TreasureQuestConfig.Name.." at "..TreasureQuestConfig.LocationName.." - "..progress.."% complete"
+                    })
+                    if progress >= 100 then
+                        StopFishing()
+                        TreasureQuestConfig.Active = false
+                        break
+                    end
+                end
+            end)
         else
-            TreasureQuestConfig.Active = false
             StopFishing()
         end
     end
@@ -278,22 +251,8 @@ local SisyphusQuestParagraph = TabGhostfinnQuest:CreateParagraph({
 })
 
 local SisyphusQuestList = {
-    {
-        Name = "Catch 3 Mythic fish",
-        Key = "CatchFish",
-        Value = 3,
-        Tier = 6,
-        Location = Locations.Sisyphus,
-        LocationName = "Sisyphus Statue"
-    },
-    {
-        Name = "Catch 1 SECRET fish",
-        Key = "CatchFish",
-        Value = 1,
-        Tier = 7,
-        Location = Locations.Sisyphus,
-        LocationName = "Sisyphus Statue"
-    }
+    { Name = "Catch 3 Mythic fish", Key = "CatchFish", Value = 3, Tier = 6, Location = Locations.Sisyphus, LocationName = "Sisyphus Statue" },
+    { Name = "Catch 1 SECRET fish", Key = "CatchFish", Value = 1, Tier = 7, Location = Locations.Sisyphus, LocationName = "Sisyphus Statue" }
 }
 
 TabGhostfinnQuest:CreateToggle({
@@ -308,26 +267,44 @@ TabGhostfinnQuest:CreateToggle({
                 while Active do
                     local quest = SisyphusQuestList[CurrentIndex]
                     if not quest then break end
-                    quest.Active = true
                     hrp.CFrame = quest.Location
                     StartFishing()
-                    TrackQuest(SisyphusQuestParagraph, quest)
-
-                    while quest.Active do
-                        task.wait(1)
-                    end
-
-                    CurrentIndex += 1
-                    if CurrentIndex > #SisyphusQuestList then
-                        Active = false
-                        break
+                    while Active do
+                        task.wait(5)
+                        local tracker = WorkspaceService:FindFirstChild("!!! MENU RINGS")
+                        local progress = 0
+                        if tracker then
+                            for _, t in ipairs(tracker:GetChildren()) do
+                                if t.Name:find("Tracker") and t.Name:lower():find(quest.Key:lower()) then
+                                    local label = t:FindFirstChild("Board") and t.Board:FindFirstChild("Gui")
+                                        and t.Board.Gui:FindFirstChild("Content")
+                                        and t.Board.Gui.Content:FindFirstChild("Progress")
+                                        and t.Board.Gui.Content.Progress:FindFirstChild("ProgressLabel")
+                                    if label and label:IsA("TextLabel") then
+                                        local percent = string.match(label.Text, "([%d%.]+)%%")
+                                        progress = tonumber(percent) or 0
+                                    end
+                                end
+                            end
+                        end
+                        SisyphusQuestParagraph:Set({
+                            Title = "Sisyphus Quests",
+                            Content = quest.Name.." at "..quest.LocationName.." - "..progress.."% complete"
+                        })
+                        if progress >= 100 then
+                            StopFishing()
+                            CurrentIndex += 1
+                            if CurrentIndex > #SisyphusQuestList then
+                                Active = false
+                                break
+                            else
+                                break
+                            end
+                        end
                     end
                 end
             end)
         else
-            for _, q in ipairs(SisyphusQuestList) do
-                q.Active = false
-            end
             StopFishing()
         end
     end
